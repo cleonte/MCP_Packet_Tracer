@@ -4,7 +4,7 @@ An MCP (Model Context Protocol) server that lets any LLM (GitHub Copilot, Claude
 
 Tell your LLM _"create a network with 3 routers, DHCP and OSPF"_ and the server plans the topology, validates everything, generates the scripts and configs, and deploys it directly to Packet Tracer in real time.
 
-**Python 3.11+ · Pydantic 2.0+ · FastMCP · Streamable HTTP · v0.5.0**
+**Python 3.11+ · Pydantic 2.0+ · FastMCP · Streamable HTTP · uv · v0.5.0**
 
 ---
 
@@ -30,6 +30,41 @@ Tell your LLM _"create a network with 3 routers, DHCP and OSPF"_ and the server 
 ---
 
 ## Installation
+
+### Using uv (recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager. If you don't have it:
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Then install and run the project:
+
+```bash
+git clone https://github.com/deiviidsito/mcp_packet_tracer
+cd mcp_packet_tracer
+
+# Install (uv creates and manages the virtualenv automatically)
+uv sync
+
+# Development extras (pytest, ruff, mypy)
+uv sync --extra dev
+
+# Run the server
+uv run python -m src.packet_tracer_mcp
+
+# Run tests
+uv run pytest tests/ -v
+```
+
+The `uv.lock` file is committed to the repo, so `uv sync` reproduces the exact same environment on every machine.
+
+### Using pip
 
 ```bash
 git clone https://github.com/deiviidsito/mcp_packet_tracer
