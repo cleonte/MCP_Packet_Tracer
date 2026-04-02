@@ -1,42 +1,89 @@
 # Packet Tracer MCP Server
 
-Servidor MCP que permite a cualquier LLM (Copilot, Claude, etc.) crear, configurar, validar y desplegar topologías de red completas en Cisco Packet Tracer.
+An MCP (Model Context Protocol) server that lets any LLM (GitHub Copilot, Claude, etc.) create, configure, validate, and **deploy in real time** complete network topologies to Cisco Packet Tracer.
 
-Le decís "creame una red con 3 routers, DHCP y OSPF" y el servidor planifica la topología, valida todo, genera los scripts y configs, y lo despliega directo en PT en tiempo real.
+Tell your LLM _"create a network with 3 routers, DHCP and OSPF"_ and the server plans the topology, validates everything, generates the scripts and configs, and deploys it directly to Packet Tracer in real time.
 
-**Python 3.11+ · Pydantic 2.0+ · FastMCP · Streamable HTTP**
+**Python 3.11+ · Pydantic 2.0+ · FastMCP · Streamable HTTP · v0.5.0**
 
 ---
 
-## Instalación
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [MCP Client Configuration](#mcp-client-configuration)
+- [Live Deploy](#live-deploy)
+- [MCP Tools (35)](#mcp-tools-35)
+- [MCP Resources (5)](#mcp-resources-5)
+- [Supported Devices](#supported-devices)
+- [IP Addressing](#ip-addressing)
+- [Routing Protocols](#routing-protocols)
+- [Topology Templates](#topology-templates)
+- [Scenario Presets](#scenario-presets)
+- [IOS Config Templates](#ios-config-templates)
+- [Architecture](#architecture)
+- [PTBuilder Extension](#ptbuilder-extension)
+- [Testing](#testing)
+- [Environment Variables](#environment-variables)
+
+---
+
+## Installation
 
 ```bash
-git clone <repo>
-cd PACKET-TRACER
+git clone https://github.com/deiviidsito/mcp_packet_tracer
+cd mcp_packet_tracer
+
+# Production
 pip install -e .
+
+# Development (includes pytest, ruff, mypy)
+pip install -e ".[dev]"
 ```
 
 ---
 
-## Uso
+## Quick Start
 
-### 1. Levantar el servidor
+### 1. Start the server
 
 ```bash
 python -m src.packet_tracer_mcp
 ```
 
-Esto inicia:
-- **Servidor MCP** en `http://127.0.0.1:39000/mcp` (streamable-http)
-- **Bridge HTTP** en `http://127.0.0.1:54321` (comunicación con Packet Tracer)
+This starts two services automatically:
 
-Ambos arrancan automáticamente. No se necesita ningún script adicional.
+| Service | Address | Purpose |
+|---------|---------|---------|
+| **MCP Server** | `http://127.0.0.1:39000/mcp` | Receives LLM tool requests (streamable-http) |
+| **HTTP Bridge** | `http://127.0.0.1:54321` | Sends commands to Packet Tracer in real time |
 
-> Para modo stdio (debug/legacy): `python -m src.packet_tracer_mcp --stdio`
+> For stdio transport (debug/legacy clients): `python -m src.packet_tracer_mcp --stdio`
 
-### 2. Configurar el cliente MCP
+### 2. Configure your MCP client
 
-**VS Code** — `.vscode/mcp.json`:
+See [MCP Client Configuration](#mcp-client-configuration) below.
+
+### 3. Ask the LLM to create a network
+
+```
+"Create a network with 2 routers, 2 switches, 4 PCs, DHCP, and static routing"
+
+→ pt_full_build generates:
+  - 8 devices: R1, R2, SW1, SW2, PC1–PC4
+  - 7 links: R1↔R2 (crossover), R1↔SW1, R2↔SW2, SW1↔PC1/PC2, SW2↔PC3/PC4
+  - IPs: LAN1 192.168.0.0/24, LAN2 192.168.1.0/24, inter-router 10.0.0.0/30
+  - DHCP pools on R1 and R2
+  - Bidirectional static routes
+  - 23 JavaScript commands sent directly to Packet Tracer
+```
+
+---
+
+## MCP Client Configuration
+
+**VS Code** (`.vscode/mcp.json`):
 
 ```json
 {
@@ -48,7 +95,7 @@ Ambos arrancan automáticamente. No se necesita ningún script adicional.
 }
 ```
 
-**Claude Desktop** — `claude_desktop_config.json`:
+**Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
@@ -60,56 +107,24 @@ Ambos arrancan automáticamente. No se necesita ningún script adicional.
 }
 ```
 
-### 3. Usar desde el LLM
+**Claude Code** (`.mcp.json` in project root):
 
-Pedile al LLM que cree una red. El servidor expone 22 tools MCP que cubren todo el pipeline:
-
-| Tool | Qué hace |
-|------|----------|
-| `pt_list_devices` | Catálogo de dispositivos disponibles |
-| `pt_list_templates` | Templates de topologías predefinidas |
-| `pt_get_device_details` | Detalle de puertos/interfaces de un modelo |
-| `pt_estimate_plan` | Estimación rápida sin generar plan completo |
-| `pt_plan_topology` | Genera un plan completo (dispositivos, links, IPs, DHCP, rutas) |
-| `pt_validate_plan` | Valida que el plan sea correcto |
-| `pt_fix_plan` | Auto-corrige errores comunes |
-| `pt_explain_plan` | Explicación en lenguaje natural del plan |
-| `pt_generate_script` | Genera script JavaScript para PTBuilder |
-| `pt_generate_configs` | Genera configuraciones CLI por dispositivo |
-| `pt_full_build` | Pipeline completo de una sola vez |
-| `pt_deploy` | Copia script al portapapeles con instrucciones |
-| `pt_live_deploy` | Envía comandos directo a PT en tiempo real |
-| `pt_bridge_status` | Verifica conexión con PT |
-| `pt_query_topology` | Consulta dispositivos existentes en PT |
-| `pt_delete_device` | Elimina un dispositivo de PT |
-| `pt_rename_device` | Renombra un dispositivo en PT |
-| `pt_move_device` | Mueve un dispositivo en el canvas |
-| `pt_delete_link` | Elimina un enlace de PT |
-| `pt_send_raw` | Envía JS arbitrario a PT |
-| `pt_export` | Exporta plan + scripts + configs a archivos |
-| `pt_list_projects` / `pt_load_project` | Gestión de proyectos guardados |
+```json
+{
+  "mcpServers": {
+    "packet-tracer": {
+      "type": "http",
+      "url": "http://127.0.0.1:39000/mcp"
+    }
+  }
+}
+```
 
 ---
 
-## ¿Por qué el servidor corre en el puerto 39000?
+## Live Deploy
 
-El servidor MCP usa **streamable-http** en lugar de stdio. Esto significa que el servidor se levanta una vez como un proceso HTTP persistente y los clientes MCP se conectan a él por red.
-
-**Ventajas sobre stdio:**
-
-- **Persistencia** — el servidor queda corriendo, no se reinicia con cada sesión del editor
-- **Múltiples clientes** — podés conectar VS Code, Claude Desktop u otros clientes al mismo servidor simultáneamente
-- **Estado compartido** — el bridge HTTP hacia Packet Tracer se mantiene activo entre requests
-- **Debug más fácil** — podés hacer curl al servidor, ver logs en la terminal donde corre
-- **Desacoplamiento** — el servidor no depende del ciclo de vida del editor
-
-El puerto 39000 fue elegido para no colisionar con puertos comunes (3000, 5000, 8000, 8080) ni con el bridge interno de PT que usa el 54321.
-
----
-
-## Live Deploy — Despliegue en tiempo real
-
-La feature principal: enviar comandos directamente a Packet Tracer sin copiar/pegar nada.
+The main feature: send commands directly to Packet Tracer without copy-pasting anything.
 
 ```
 ┌─────────┐         ┌──────────────┐   HTTP    ┌──────────────┐  $se()  ┌──────────────┐
@@ -118,361 +133,413 @@ La feature principal: enviar comandos directamente a Packet Tracer sin copiar/pe
 └─────────┘         └──────────────┘           └──────────────┘        └──────────────┘
 ```
 
-Hay **dos servidores HTTP** corriendo:
+### Setup (once per Packet Tracer session)
 
-| Puerto | Qué es | Para qué |
-|--------|--------|----------|
-| **39000** | Servidor MCP (streamable-http) | Recibe requests de tools del LLM/editor |
-| **54321** | Bridge HTTP interno | Envía comandos JS a PTBuilder dentro de Packet Tracer |
-
-### Setup del bridge (una vez por sesión de PT):
-
-1. Abrí Packet Tracer 8.2+
-2. Abrí **Builder Code Editor** (Extensions > Builder Code Editor)
-3. Pegá este bootstrap y hacé clic en **Run**:
+1. Open **Packet Tracer 8.2+**
+2. Open **Builder Code Editor** (`Extensions > Builder Code Editor`)
+3. Paste the bootstrap script below and click **Run**:
 
 ```javascript
 /* PT-MCP Bridge */ window.webview.evaluateJavaScriptAsync("setInterval(function(){var x=new XMLHttpRequest();x.open('GET','http://127.0.0.1:54321/next',true);x.onload=function(){if(x.status===200&&x.responseText){$se('runCode',x.responseText)}};x.onerror=function(){};x.send()},500)");
 ```
 
-Eso hace que PTBuilder haga polling cada 500ms al bridge. Cuando el LLM genera comandos, el MCP Server los encola en el bridge y PT los ejecuta en tiempo real.
+This makes PTBuilder poll the bridge every 500 ms. When the LLM generates commands, the MCP Server queues them on the bridge and Packet Tracer executes them in real time.
+
+> **Technical note:** The bootstrap injects a `setInterval` into the webview that polls HTTP. `$se('runCode', ...)` bridges from the webview to the PT Script Engine. `/* */` comments are used instead of `//` because PTBuilder's `executeCode()` strips newlines.
+
+### Permanent setup (optional)
+
+To have the bridge start automatically when Builder Code Editor opens:
+
+1. In PT: `Extensions > Scripting Interface`
+2. Select the Builder module
+3. Replace `main.js` and `interface.js` with the modified versions in `PTBuilder/source/`
+4. Save and restart the module
 
 ---
 
-## Arquitectura
+## MCP Tools (35)
 
-```
-src/packet_tracer_mcp/
-├── adapters/mcp/          # Tools y resources MCP
-├── application/           # Use cases + DTOs
-├── domain/
-│   ├── models/           # TopologyPlan, DevicePlan, LinkPlan
-│   ├── services/         # Orchestrator, IPPlanner, Validator, AutoFixer
-│   └── rules/            # Reglas de validación
-├── infrastructure/
-│   ├── catalog/          # Catálogo de dispositivos, cables, templates
-│   ├── generator/        # Generador de scripts JS + configs CLI
-│   ├── execution/        # Bridge HTTP + Live Executor
-│   └── persistence/      # Proyectos guardados
-├── server.py             # Entry point del servidor
-└── settings.py           # Configuración
-```
+### Catalog
 
-### Flujo de datos
+| Tool | Description |
+|------|-------------|
+| `pt_list_devices` | List all available devices with ports |
+| `pt_list_templates` | List available topology templates |
+| `pt_get_device_details` | Full port/interface details for a device model |
 
-1. **Request** → el LLM describe qué red quiere
-2. **Planificación** → el Orchestrator genera un `TopologyPlan` completo
-3. **Validación** → el Validator verifica modelos, puertos, cables, IPs
-4. **Auto-fix** → el AutoFixer corrige errores comunes automáticamente
-5. **Generación** → se produce el script JS para PTBuilder + configs CLI
-6. **Deploy** → se envía a PT vía bridge HTTP o se exporta a archivos
+### Estimation
 
-### Direccionamiento IP
+| Tool | Description |
+|------|-------------|
+| `pt_estimate_plan` | Dry-run: estimate device/link counts without generating a full plan |
 
-- **LANs**: `192.168.X.0/24` — gateway en `.1`, PCs desde `.2`
-- **Links inter-router**: `10.0.X.0/30` — 2 hosts por enlace
+### Planning
 
-### Routing soportado
+| Tool | Description |
+|------|-------------|
+| `pt_plan_topology` | Generate a complete plan (devices, links, IPs, DHCP, routes) |
 
-- **static** — genera `ip route` completas
-- **ospf** — genera `router ospf` con áreas
-- **none** — sin routing
+### Validation
 
----
+| Tool | Description |
+|------|-------------|
+| `pt_validate_plan` | Validate a plan with 15 typed error codes |
+| `pt_fix_plan` | Auto-correct common errors (cables, models, ports) |
+| `pt_explain_plan` | Natural language explanation of every plan decision |
+| `pt_validate_config` | Validate IOS config lines against the topology (IP conflicts, missing `no shutdown`, ACL mismatches) |
+| `pt_validate_topology` | Deep topology checks (orphaned devices, loops without STP, OSPF mismatches) |
 
-## Tests
+### Generation
 
-```bash
-python -m pytest tests/ -v
-```
+| Tool | Description |
+|------|-------------|
+| `pt_generate_script` | Generate the PTBuilder JavaScript script |
+| `pt_generate_configs` | Generate per-device IOS CLI configurations |
 
----
+### Full Pipeline
 
-## Requisitos
+| Tool | Description |
+|------|-------------|
+| `pt_full_build` | Plan + validate + generate + deploy in one call |
 
-- Python 3.11+
-- Cisco Packet Tracer 8.2+ (para live deploy)
-- PTBuilder extension instalada en PT (incluida en `PTBuilder/`)
+### Live Deploy & Bridge
 
-5. Listo. El MCP server puede crear dispositivos, enlaces y configurar routers automáticamente.
+| Tool | Description |
+|------|-------------|
+| `pt_live_deploy` | Send commands directly to PT in real time via HTTP bridge |
+| `pt_deploy` | Copy script to clipboard with step-by-step instructions |
+| `pt_bridge_status` | Check whether the bridge is active |
+| `pt_ping_bridge` | Health check — returns bridge_up, pt_connected, url |
+| `pt_undo_last_action` | Undo the last command sent to PT |
+| `pt_load_last_plan` | Reload the last successfully deployed plan from disk |
 
-> **Nota técnica**: El bootstrap inyecta un `setInterval` en el webview que hace polling HTTP. El `$se('runCode', ...)` bridgea del webview al Script Engine de PT. PTBuilder usa `executeCode()` que internamente hace `code.replace(/\n/g, "")`, por eso el bootstrap usa `/* */` comments en vez de `//`.
+### Topology Interaction
 
-### Setup permanente (opcional):
+| Tool | Description |
+|------|-------------|
+| `pt_query_topology` | Query which devices currently exist in PT |
+| `pt_delete_device` | Delete a device and its links from PT |
+| `pt_rename_device` | Rename a device in the active topology |
+| `pt_move_device` | Move a device to new canvas coordinates |
+| `pt_delete_link` | Delete the link on a specific interface |
+| `pt_send_raw` | Send arbitrary JavaScript to the PT Script Engine |
 
-Para que el polling arranque automáticamente al abrir Builder Code Editor:
+### Intelligence
 
-1. En PT: Extensions > Scripting Interface
-2. Seleccioná el módulo Builder
-3. Reemplazá `main.js` e `interface.js` con las versiones modificadas en `PTBuilder/source/`
-4. Guardá y reiniciá el módulo
+| Tool | Description |
+|------|-------------|
+| `pt_analyze_topology` | Parse a natural language topology description into a structured plan |
+| `pt_suggest_improvements` | Analyze a plan and suggest redundancy, security, and best-practice improvements |
+| `pt_calculate_addressing` | Auto-generate IPv4/IPv6 dual-stack addressing for multiple sites |
 
----
+### IOS Config Templates
 
-## MCP Tools (22)
+| Tool | Description |
+|------|-------------|
+| `pt_list_config_templates` | List all available Jinja2 IOS config templates |
+| `pt_apply_template` | Render a template with context and get ready-to-paste CLI commands |
 
-### Consulta
-| Tool | Descripción |
-|------|------------|
-| `pt_list_devices` | Lista todos los dispositivos disponibles con sus puertos |
-| `pt_list_templates` | Lista las plantillas de topología disponibles |
-| `pt_get_device_details` | Detalles completos de un modelo específico |
+### Scenario Presets
 
-### Estimación
-| Tool | Descripción |
-|------|------------|
-| `pt_estimate_plan` | Dry-run: estima dispositivos, enlaces y complejidad sin generar |
+| Tool | Description |
+|------|-------------|
+| `pt_list_presets` | List all available scenario presets with descriptions |
+| `pt_load_preset` | Load a preset and generate a complete build plan |
 
-### Planificación
-| Tool | Descripción |
-|------|------------|
-| `pt_plan_topology` | Genera un plan completo desde parámetros (routers, PCs, routing, etc.) |
+### Export & Projects
 
-### Validación
-| Tool | Descripción |
-|------|------------|
-| `pt_validate_plan` | Valida un plan con 15 tipos de error tipificados |
-| `pt_fix_plan` | Auto-corrige errores comunes (cables, modelos, puertos) |
-| `pt_explain_plan` | Genera explicación en lenguaje natural de cada decisión |
-
-### Generación
-| Tool | Descripción |
-|------|------------|
-| `pt_generate_script` | Genera script JavaScript para PTBuilder |
-| `pt_generate_configs` | Genera configuraciones CLI (IOS) por dispositivo |
-
-### Pipeline completo
-| Tool | Descripción |
-|------|------------|
-| `pt_full_build` | Todo en uno: planifica, valida, genera y exporta |
-
-### Despliegue en vivo
-| Tool | Descripción |
-|------|------------|
-| `pt_deploy` | Copia script al portapapeles + instrucciones manuales |
-| `pt_live_deploy` | Envía comandos directo a PT en tiempo real via HTTP bridge |
-| `pt_bridge_status` | Verifica si el bridge está activo y PT está conectado |
-
-### Interacción con topología existente
-| Tool | Descripción |
-|------|------------|
-| `pt_query_topology` | Consulta qué dispositivos existen actualmente en PT |
-| `pt_delete_device` | Elimina un dispositivo y sus enlaces de PT |
-| `pt_rename_device` | Renombra un dispositivo en la topología activa |
-| `pt_move_device` | Mueve un dispositivo a nuevas coordenadas en el canvas |
-| `pt_delete_link` | Elimina el enlace de una interfaz específica |
-| `pt_send_raw` | Envía código JS arbitrario al Script Engine de PT |
-
-### Exportación y proyectos
-| Tool | Descripción |
-|------|------------|
-| `pt_export` | Exporta a archivos (JS script, CLI configs, JSON plan) |
-| `pt_list_projects` | Lista proyectos guardados |
-| `pt_load_project` | Carga un proyecto guardado |
+| Tool | Description |
+|------|-------------|
+| `pt_export` | Export plan + scripts + configs to files (JS, CLI, JSON) |
+| `pt_export_documentation` | Generate full documentation: addressing table, topology description, verification commands |
+| `pt_list_projects` | List saved projects |
+| `pt_load_project` | Load a saved project |
 
 ---
 
 ## MCP Resources (5)
 
-| URI | Descripción |
-|-----|------------|
-| `pt://catalog/devices` | Todos los dispositivos con puertos |
-| `pt://catalog/cables` | Tipos de cable |
-| `pt://catalog/aliases` | Aliases de modelos |
-| `pt://catalog/templates` | Plantillas de topología |
-| `pt://capabilities` | Capacidades del servidor |
+| URI | Description |
+|-----|-------------|
+| `pt://catalog/devices` | All devices with ports |
+| `pt://catalog/cables` | Cable types |
+| `pt://catalog/aliases` | Model aliases |
+| `pt://catalog/templates` | Topology templates |
+| `pt://capabilities` | Server capabilities |
 
 ---
 
-## Dispositivos soportados
+## Supported Devices
 
 ### Routers
-| Modelo | Puertos |
-|--------|---------|
-| 1941 | Gig0/0, Gig0/1, Se0/0/0, Se0/0/1 |
-| 2901 | Gig0/0, Gig0/1, Se0/0/0, Se0/0/1 |
-| 2911 | Gig0/0, Gig0/1, Gig0/2, Se0/0/0, Se0/0/1 |
-| 4321 (ISR4321) | Gig0/0/0, Gig0/0/1 |
+
+| Model | Interfaces |
+|-------|-----------|
+| 1941 | GigabitEthernet0/0, GigabitEthernet0/1 |
+| 2901 | GigabitEthernet0/0, GigabitEthernet0/1 |
+| 2911 | GigabitEthernet0/0, GigabitEthernet0/1, GigabitEthernet0/2 |
+| ISR4321 | GigabitEthernet0/0/0, GigabitEthernet0/0/1 |
+
+> **Note:** No router has serial ports by default. Serial interfaces require HWIC modules.
 
 ### Switches
-| Modelo | Puertos |
-|--------|---------|
-| 2960-24TT | Fa0/1–24, Gig0/1–2 |
-| 3560-24PS | Fa0/1–24, Gig0/1–2 |
+
+| Model | Interfaces |
+|-------|-----------|
+| 2960-24TT | FastEthernet0/1–24, GigabitEthernet0/1–2 |
+| 3560-24PS | FastEthernet0/1–24, GigabitEthernet0/1–2 |
 
 ### End Devices
-| Modelo | Puertos |
-|--------|---------|
-| PC-PT | Fa0 |
-| Server-PT | Fa0 |
-| Laptop-PT | Fa0 |
 
-### Otros
-| Modelo | Tipo |
-|--------|------|
+| Model | Interface |
+|-------|----------|
+| PC-PT | FastEthernet0 |
+| Server-PT | FastEthernet0 |
+| Laptop-PT | FastEthernet0 |
+
+### Other
+
+| Model | Type |
+|-------|------|
 | Cloud-PT | WAN Cloud |
 | AccessPoint-PT | Wireless AP |
 
 ---
 
-## Tipos de cable
+## Cable Types
 
-| Cable | Uso típico |
-|-------|-----------|
-| straight | Switch↔Router, Switch↔PC |
-| cross | Router↔Router, Switch↔Switch, PC↔PC |
-| serial | Router Serial↔Router Serial (WAN) |
-| fiber | Conexiones de fibra óptica |
-| auto | Detección automática |
-
----
-
-## Direccionamiento IP
-
-- **LANs**: `192.168.X.0/24` — Gateway en `.1`, PCs desde `.2`
-- **Inter-router links**: `10.0.X.0/30` — Punto a punto entre routers
-- **DHCP**: Pool automático por LAN con exclusión del gateway
+| Cable | Typical Use |
+|-------|-------------|
+| `straight` | Switch ↔ Router, Switch ↔ PC |
+| `cross` | Router ↔ Router, Switch ↔ Switch, PC ↔ PC |
+| `serial` | Router serial ↔ Router serial (WAN) |
+| `fiber` | Fiber-optic connections |
+| `auto` | Auto-detection |
 
 ---
 
-## Routing soportado
+## IP Addressing
 
-| Protocolo | Estado | Genera |
-|-----------|--------|--------|
-| static | ✅ Completo | `ip route` commands |
-| ospf | ✅ Completo | `router ospf` configs |
-| eigrp | 🔲 Enum only | No implementado |
-| rip | 🔲 Enum only | No implementado |
-| none | ✅ | Sin routing |
+- **LANs:** `192.168.0.0/16` base, `/24` prefixes — gateway at `.1`, PCs from `.2`
+- **Inter-router links:** `10.0.0.0/16` base, `/30` prefixes — 2 hosts per link
+- **DHCP:** Automatic pool per LAN with gateway exclusion
+- **IPv6 dual-stack:** Available via `pt_calculate_addressing` (`fd00::/48` ULA base)
 
 ---
 
-## Templates
+## Routing Protocols
 
-| Template | Descripción |
-|----------|------------|
+| Protocol | Status | Generates |
+|----------|--------|-----------|
+| `static` | Complete | `ip route` commands; supports floating routes with AD=254 |
+| `ospf` | Complete | `router ospf` with router-id and area support |
+| `rip` | Complete | `router rip` v2 with `no auto-summary` |
+| `eigrp` | Complete | `router eigrp` with wildcard masks and AS number |
+| `none` | Complete | No routing configured |
+
+---
+
+## Topology Templates
+
+| Template | Description |
+|----------|-------------|
 | `single_lan` | 1 router + 1 switch + PCs |
-| `multi_lan` | N routers interconectados, cada uno con su LAN |
-| `multi_lan_wan` | Multi LAN con nube WAN |
-| `star` | Router central con routers satelitales |
+| `multi_lan` | N routers interconnected, each with its own LAN |
+| `multi_lan_wan` | Multi-LAN with WAN cloud |
+| `star` | Central router with satellite routers |
 | `hub_spoke` | Hub-and-spoke |
-| `branch_office` | Sucursales |
+| `branch_office` | Branch offices |
 | `router_on_a_stick` | Inter-VLAN routing |
-| `three_router_triangle` | 3 routers en triángulo |
-| `custom` | Personalizado |
+| `three_router_triangle` | 3 routers in a triangle |
+| `custom` | Custom |
 
 ---
 
-## Arquitectura
+## Scenario Presets
+
+Ready-made topologies that generate complete, wired, and configured plans in one call.
+
+| Preset | Description |
+|--------|-------------|
+| `small_office` | 1 router, 1 switch, 5 PCs with DHCP |
+| `branch_hq` | 2 sites connected via WAN, OSPF, DHCP |
+| `dmz_network` | Router as firewall with DMZ server zone and internal LAN |
+| `redundant_core` | Dual core with floating static routes |
+| `full_enterprise` | HQ + 2 branches, OSPF, servers |
+| `ccna_lab_1` | Classic CCNA exam topology |
+| `ccnp_switch_lab` | Multi-switch lab, OSPF |
+| `ipv6_dual_stack` | IPv4 + IPv6 dual-stack |
+
+---
+
+## IOS Config Templates
+
+Jinja2-based templates that generate ready-to-paste IOS CLI commands.
+
+| Template | Description |
+|----------|-------------|
+| `ospf_basic` | OSPF with areas and passive interfaces |
+| `eigrp_named` | EIGRP named mode |
+| `vlan_trunk` | VLAN creation + trunk ports |
+| `hsrp_pair` | HSRP active/standby pair |
+| `nat_overload` | NAT overload (PAT) |
+| `acl_dmz` | Extended ACL for DMZ |
+| `dhcp_server` | DHCP pool with exclusions |
+| `stp_rapid` | Rapid PVST+ with root bridge |
+
+---
+
+## Architecture
 
 ```
 src/packet_tracer_mcp/
 ├── adapters/mcp/              # MCP protocol layer
-│   ├── tool_registry.py       # 22 MCP tools
+│   ├── tools/                 # Split by domain concern (9 modules)
+│   │   ├── catalog_tools.py        # pt_list_devices, pt_list_templates, pt_get_device_details
+│   │   ├── planning_tools.py       # pt_estimate_plan, pt_plan_topology
+│   │   ├── validation_tools.py     # pt_validate_plan, pt_fix_plan, pt_explain_plan,
+│   │   │                           # pt_validate_config, pt_validate_topology
+│   │   ├── generation_tools.py     # pt_generate_script, pt_generate_configs, pt_full_build
+│   │   ├── deploy_tools.py         # pt_export, pt_deploy, pt_list_projects, pt_load_project,
+│   │   │                           # pt_export_documentation
+│   │   ├── bridge_tools.py         # pt_live_deploy, pt_bridge_status, pt_ping_bridge,
+│   │   │                           # pt_undo_last_action, pt_load_last_plan,
+│   │   │                           # pt_query/delete/rename/move/send_raw
+│   │   ├── topology_tools.py       # pt_analyze_topology, pt_suggest_improvements,
+│   │   │                           # pt_calculate_addressing
+│   │   ├── preset_tools.py         # pt_list_presets, pt_load_preset
+│   │   └── template_tools.py       # pt_list_config_templates, pt_apply_template
+│   ├── tool_registry.py       # Coordinator — delegates to tools/
 │   └── resource_registry.py   # 5 MCP resources
 ├── application/               # Use cases + DTOs (requests/responses)
 ├── domain/                    # Core business logic
-│   ├── models/               # TopologyPlan, DevicePlan, LinkPlan, errors
-│   ├── services/             # Orchestrator, IPPlanner, Validator, AutoFixer
+│   ├── models/               # TopologyPlan, DevicePlan, LinkPlan, errors, TopologyAnalysis
+│   ├── services/             # Orchestrator, IPPlanner, Validator, AutoFixer, Explainer,
+│   │                         # Estimator, TopologyAnalyzer, TemplateEngine, Presets
 │   └── rules/                # Validation rules (devices, cables, IPs)
 ├── infrastructure/
-│   ├── catalog/              # Device catalog, cables, templates, aliases
+│   ├── catalog/              # Device catalog, cable types, templates, aliases
 │   ├── generator/            # PTBuilder JS + CLI config generators
-│   ├── execution/            # Executors + HTTP bridge
-│   │   ├── live_bridge.py    # PTCommandBridge (HTTP server :54321)
-│   │   ├── live_executor.py  # LiveExecutor (sends plan → bridge → PT)
-│   │   ├── deploy_executor.py# DeployExecutor (clipboard + instructions)
-│   │   └── manual_executor.py# ManualExecutor (file export)
+│   ├── execution/            # HTTP bridge + live executor + deploy + manual export
 │   └── persistence/          # Project save/load
-├── shared/                    # Enums, constants, utilities
+├── shared/
+│   └── templates/            # 8 Jinja2 IOS config templates (.j2)
 ├── server.py                  # MCP server entry point
-└── settings.py                # Version + config
+├── settings.py                # Version + config (v0.5.0)
+└── __main__.py                # python -m entry point
 ```
 
-### Flujo de datos
+### Data Flow
 
 ```
 TopologyRequest → Orchestrator → IPPlanner → Validator → AutoFixer
-                                                            ↓
+                                                              ↓
                                               TopologyPlan (validated)
-                                                            ↓
-                                    ┌───────────────────────┼──────────────────┐
-                                    ↓                       ↓                  ↓
-                            PTBuilder Script          CLI Configs        Live Deploy
-                           (addDevice/addLink)    (hostname, IPs,     (HTTP bridge
-                                                   DHCP, routing)      → PT real-time)
+                                                              ↓
+                                    ┌─────────────────────────┼──────────────────┐
+                                    ↓                         ↓                  ↓
+                            PTBuilder Script            CLI Configs         Live Deploy
+                           (addDevice/addLink)      (hostname, IPs,     (HTTP bridge
+                                                     DHCP, routing)      → PT real-time)
 ```
+
+### Why port 39000?
+
+The server uses **streamable-http** instead of stdio. This means it runs once as a persistent HTTP process and MCP clients connect to it over the network.
+
+**Advantages over stdio:**
+- **Persistence** — the server stays running, not restarted with each editor session
+- **Multiple clients** — VS Code, Claude Desktop, and other clients can connect to the same server simultaneously
+- **Shared state** — the HTTP bridge to Packet Tracer stays active between requests
+- **Easier debugging** — you can `curl` the server and see logs in the terminal
+- **Decoupling** — the server is independent of the editor lifecycle
+
+Port 39000 was chosen to avoid collisions with common ports (3000, 5000, 8000, 8080) and the internal PT bridge port (54321).
 
 ---
 
-## PTBuilder (extensión de PT)
+## PTBuilder Extension
 
-El directorio `PTBuilder/` contiene el código fuente del Script Module "Builder Code Editor":
+The `PTBuilder/` directory contains the source of the "Builder Code Editor" Script Module:
 
-| Archivo | Función |
-|---------|---------|
-| `source/main.js` | Entry point — crea menú y webview |
-| `source/runcode.js` | `runCode(scriptText)` — ejecuta JS en Script Engine |
+| File | Purpose |
+|------|---------|
+| `source/main.js` | Entry point — creates menu and webview |
+| `source/runcode.js` | `runCode(scriptText)` — executes JS in the Script Engine |
 | `source/userfunctions.js` | `addDevice()`, `addLink()`, `configureIosDevice()`, `configurePcIp()`, `queryTopology()`, `deleteDevice()`, `renameDevice()`, `moveDevice()`, `deleteLink()` |
-| `source/devices.js` | Mapeo modelo → tipo numérico de PT |
-| `source/links.js` | Mapeo tipo de cable → ID numérico |
-| `source/modules.js` | Mapeo módulos de hardware |
-| `source/window.js` | Gestión de la ventana webview (QWebEngine) |
-| `source/interface/` | HTML + JS del editor web (status panel + real-time logging) |
-| `Builder.pts` | Paquete compilado de la extensión (binario, no editable) |
+| `source/devices.js` | Model → PT numeric type mapping |
+| `source/links.js` | Cable type → PT numeric ID mapping |
+| `source/modules.js` | Hardware module mapping |
+| `source/window.js` | Webview window management (QWebEngine) |
+| `source/interface/` | HTML + JS for the web editor (status panel + real-time logging) |
+| `Builder.pts` | Compiled extension package (binary) |
 
-### API principal de PTBuilder
+### PTBuilder API
 
 ```javascript
-// Crear dispositivo en coordenadas (x, y)
+// Create a device at coordinates (x, y)
 addDevice("R1", "2911", 100, 200);
 
-// Crear enlace entre dos dispositivos
+// Create a link between two devices
 addLink("R1", "GigabitEthernet0/1", "S1", "GigabitEthernet0/1", "straight");
 
-// Configurar router/switch con CLI commands
-configureIosDevice("R1", "enable\nconfigure terminal\nhostname R1\ninterface GigabitEthernet0/0\nip address 192.168.0.1 255.255.255.0\nno shutdown\nexit");
+// Configure a router/switch with IOS CLI commands
+configureIosDevice("R1", [
+  "enable",
+  "configure terminal",
+  "hostname R1",
+  "interface GigabitEthernet0/0",
+  "ip address 192.168.0.1 255.255.255.0",
+  "no shutdown"
+].join("\n"));
 
-// Configurar IP estática de PC
+// Configure a PC with a static IP
 configurePcIp("PC1", false, "192.168.0.2", "255.255.255.0", "192.168.0.1");
 
-// Configurar PC para DHCP
+// Configure a PC for DHCP
 configurePcIp("PC1", true);
 ```
 
 ---
 
-## Tests
+## Testing
 
 ```bash
-# Todos los tests
+# All tests (129 tests across 15 files)
 python -m pytest tests/ -v
 
-# Un archivo
+# Single test file
 python -m pytest tests/test_full_build.py -v
 
-# Un test específico
+# Specific test
 python -m pytest tests/test_full_build.py::TestFullBuild::test_basic_2_routers -v
+
+# With coverage
+python -m pytest tests/ --cov=src/packet_tracer_mcp --cov-report=term-missing
 ```
 
-34 tests cubriendo: IP planning, validación, auto-fix, explicación, estimación, generación y full build integration.
+Test coverage includes: IP planning, validation, auto-fix, explanation, estimation, code generation, full-build integration (8 scenarios), RIP and EIGRP routing (14 tests), project persistence, resource/catalog validity, topology intelligence (20 tests), Jinja2 config templates (11 tests), scenario presets, validation upgrades (12 tests), and bridge recovery (4 tests).
 
 ---
 
-## Ejemplo de uso rápido
+## Environment Variables
 
-```
-Usuario:  "Creame una red con 2 routers, 2 switches, 4 PCs, DHCP y static routing"
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PT_MCP_PORT` | `39000` | MCP server HTTP port |
+| `PT_MCP_LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
-→ pt_full_build genera:
-  - 8 dispositivos: R1, R2, SW1, SW2, PC1, PC2, PC3, PC4
-  - 7 enlaces: R1↔R2 (cross), R1↔SW1 (straight), R2↔SW2 (straight), SW1↔PC1, SW1↔PC2, SW2↔PC3, SW2↔PC4
-  - IPs: LAN1 192.168.0.0/24, LAN2 192.168.1.0/24, Inter-router 10.0.0.0/30
-  - DHCP pools en R1 y R2
-  - Static routes bidireccionales
-  - 23 comandos JavaScript enviados a PT
+---
 
-→ pt_live_deploy envía todo a Packet Tracer y aparecen los dispositivos configurados
-```
-#   M C P _ P a c k e t _ T r a c e r  
- 
+## Requirements
+
+- Python 3.11+
+- Cisco Packet Tracer 8.2+ (for live deploy)
+- PTBuilder extension installed in PT (included in `PTBuilder/`)
+
+---
+
+## License
+
+MIT
