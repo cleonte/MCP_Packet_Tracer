@@ -40,6 +40,7 @@ def register_bridge_tools(mcp: FastMCP) -> None:
     def pt_live_deploy(
         plan_json: str,
         command_delay: float = 1.0,
+        boot_wait: float = 15.0,
     ) -> str:
         """
         Send commands directly to Packet Tracer in real time.
@@ -47,9 +48,17 @@ def register_bridge_tools(mcp: FastMCP) -> None:
         The HTTP bridge starts automatically inside the MCP server.
         Just make sure the bootstrap is running in Builder Code Editor.
 
+        Deployment is split into two phases:
+          Phase 1 — topology: addDevice, addModule, addLink
+          Phase 2 — configs: configureIosDevice, configurePcIp
+        A boot_wait delay is inserted between phases so routers have
+        time to fully start up before receiving IOS CLI commands.
+
         Parameters:
         - plan_json: Plan JSON (output of pt_plan_topology or pt_full_build)
         - command_delay: delay between commands in seconds (default 1.0)
+        - boot_wait: seconds to wait after topology phase before sending
+          configs, to allow routers to boot (default 15.0)
         """
         if not ensure_bridge():
             return (
@@ -61,9 +70,7 @@ def register_bridge_tools(mcp: FastMCP) -> None:
             return (
                 "Bridge active at http://127.0.0.1:54321 but PT is NOT connected.\n\n"
                 "Paste this in Builder Code Editor (Extensions > Builder Code Editor) "
-                "and click Run:\n\n"
-                + get_bootstrap()
-                + "\n\nThen call pt_live_deploy again.\n\n"
+                "and click Run:\n\n" + get_bootstrap() + "\n\nThen call pt_live_deploy again.\n\n"
                 "IMPORTANT: XMLHttpRequest does NOT exist in PT's Script Engine.\n"
                 "The bootstrap injects a polling loop in the webview (QWebEngine) "
                 "which DOES have XMLHttpRequest."
@@ -78,10 +85,37 @@ def register_bridge_tools(mcp: FastMCP) -> None:
             len(commands),
         )
 
+        # Split commands into two phases:
+        # Phase 1 — structural: addDevice, addModule, addLink
+        # Phase 2 — config: configureIosDevice, configurePcIp
+        _CONFIG_PREFIXES = ("configureIosDevice(", "configurePcIp(")
+        topo_cmds = [c for c in commands if not c.startswith(_CONFIG_PREFIXES)]
+        cfg_cmds = [c for c in commands if c.startswith(_CONFIG_PREFIXES)]
+
         sent = 0
         bridge_url = get_bridge_url()
         clear_command_history()
-        for cmd in commands:
+
+        # --- Phase 1: topology ---
+        logger.info("pt_live_deploy: phase 1 — sending %d topology commands", len(topo_cmds))
+        for cmd in topo_cmds:
+            status, _ = http_post(f"{bridge_url}/queue", cmd)
+            if status == 200:
+                sent += 1
+                record_command(cmd)
+            time.sleep(command_delay)
+
+        # --- Boot wait ---
+        if cfg_cmds and boot_wait > 0:
+            logger.info(
+                "pt_live_deploy: waiting %.0fs for devices to boot before sending configs",
+                boot_wait,
+            )
+            time.sleep(boot_wait)
+
+        # --- Phase 2: configs ---
+        logger.info("pt_live_deploy: phase 2 — sending %d config commands", len(cfg_cmds))
+        for cmd in cfg_cmds:
             status, _ = http_post(f"{bridge_url}/queue", cmd)
             if status == 200:
                 sent += 1
@@ -91,7 +125,7 @@ def register_bridge_tools(mcp: FastMCP) -> None:
         # Persist plan for recovery
         save_last_plan(plan_json)
 
-        logger.info("pt_live_deploy: sent %d commands", sent)
+        logger.info("pt_live_deploy: sent %d / %d commands", sent, len(commands))
         failed = len(commands) - sent
         status_line = (
             "Topology deployed to Packet Tracer!"
@@ -101,8 +135,11 @@ def register_bridge_tools(mcp: FastMCP) -> None:
         return (
             f"{status_line}\n"
             f"  Commands extracted : {len(commands)}\n"
+            f"  Topology commands  : {len(topo_cmds)}\n"
+            f"  Config commands    : {len(cfg_cmds)}\n"
             f"  Commands sent      : {sent}\n"
             f"  Queuing errors     : {failed}\n"
+            f"  Boot wait          : {boot_wait}s\n"
             f"  Devices            : {len(plan.devices)}\n"
             f"  Links              : {len(plan.links)}"
         )
@@ -128,8 +165,7 @@ def register_bridge_tools(mcp: FastMCP) -> None:
         return (
             "Bridge active at http://127.0.0.1:54321 but PT is NOT connected.\n\n"
             "Paste this in Builder Code Editor (Extensions > Builder Code Editor) "
-            "and click Run:\n\n"
-            + get_bootstrap()
+            "and click Run:\n\n" + get_bootstrap()
         )
 
     @mcp.tool()
@@ -162,7 +198,7 @@ def register_bridge_tools(mcp: FastMCP) -> None:
         if cmd.startswith("addDevice("):
             # Parse: addDevice("name", "model", x, y)
             try:
-                inner = cmd[len("addDevice("):]
+                inner = cmd[len("addDevice(") :]
                 if inner.endswith(");"):
                     inner = inner[:-2]
                 elif inner.endswith(")"):
@@ -220,8 +256,14 @@ def register_bridge_tools(mcp: FastMCP) -> None:
             return "No devices in current topology."
 
         type_labels = {
-            0: "Router", 1: "Switch", 7: "AccessPoint", 8: "PC",
-            9: "Server", 16: "L3 Switch", 17: "Laptop", 18: "Tablet",
+            0: "Router",
+            1: "Switch",
+            7: "AccessPoint",
+            8: "PC",
+            9: "Server",
+            16: "L3 Switch",
+            17: "Laptop",
+            18: "Tablet",
         }
         lines = [f"Devices in Packet Tracer ({data.get('count', len(devices))}):", ""]
         for d in devices:
